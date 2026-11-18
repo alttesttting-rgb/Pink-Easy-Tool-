@@ -27,4 +27,5 @@ android {
 
 dependencies {
     implementation("com.android.tools.build:apksig:8.7.3")
+    implementation("androidx.documentfile:documentfile:1.0.1")
 }
