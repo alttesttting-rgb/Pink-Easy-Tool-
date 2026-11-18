@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import androidx.documentfile.provider.DocumentFile
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
@@ -39,6 +40,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildHome()
+        ensurePublicM2Folder()
     }
 
     private fun buildHome() {
@@ -109,6 +111,42 @@ class MainActivity : Activity() {
         return box
     }
 
+    private fun ensurePublicM2Folder() {
+        val saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_PUBLIC_TREE, null)
+        if (saved == null) {
+            show("Choose a public Quest storage folder so Pink Easy Tool can create M2.")
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                )
+            }
+            startActivityForResult(intent, PICK_PUBLIC_FOLDER)
+            return
+        }
+        val uri = Uri.parse(saved)
+        try {
+            createM2Folder(uri)
+        } catch (_: SecurityException) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(KEY_PUBLIC_TREE).apply()
+            show("Storage permission expired. Choose the Quest storage folder again.")
+            ensurePublicM2Folder()
+        }
+    }
+
+    private fun createM2Folder(treeUri: Uri) {
+        val root = DocumentFile.fromTreeUri(this, treeUri)
+            ?: throw IllegalStateException("The selected storage location is unavailable.")
+        val existing = root.findFile("M2")
+        val folder = existing ?: root.createDirectory("M2")
+            ?: throw IllegalStateException("Android could not create the M2 folder.")
+        if (!folder.isDirectory) {
+            throw IllegalStateException("An item named M2 already exists there and is not a folder.")
+        }
+        show("M2 folder is ready in Quest public storage.")
+    }
+
     private fun chooseApk() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -138,6 +176,20 @@ class MainActivity : Activity() {
         if (resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         when (requestCode) {
+            PICK_PUBLIC_FOLDER -> {
+                try {
+                    val flags = data?.flags ?: 0
+                    contentResolver.takePersistableUriPermission(
+                        uri,
+                        flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    )
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .putString(KEY_PUBLIC_TREE, uri.toString()).apply()
+                    createM2Folder(uri)
+                } catch (e: Exception) {
+                    show("Could not access that folder: ${e.message ?: e.javaClass.simpleName}")
+                }
+            }
             PICK_APK -> {
                 selectedApk = uri
                 try {
@@ -331,7 +383,10 @@ class MainActivity : Activity() {
     )
 
     companion object {
+        private const val PICK_PUBLIC_FOLDER = 1000
         private const val PICK_APK = 1001
         private const val CREATE_SIGNED_APK = 1002
+        private const val PREFS = "pink_easy_tool_preferences"
+        private const val KEY_PUBLIC_TREE = "public_storage_tree_uri"
     }
 }
